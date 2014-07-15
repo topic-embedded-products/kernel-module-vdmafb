@@ -14,7 +14,12 @@
 			dmas = <&axi_vdma_0 0>;
 			dma-names = "video";
 			width = <1024>;
-			height = <768>;
+			height = <600>;
+			horizontal-front-porch = <160>;
+			horizontal-back-porch = <160>;
+			horizontal-sync = <136>;
+			vertical-front-porch = <17>;
+			vertical-back-porch = <18>;
 		};
  */
 
@@ -34,11 +39,27 @@
 #include <linux/amba/xilinx_dma.h>
 
 /* Register locations */
-#define VDMAFB_CONTROL	0
+#define VDMAFB_CONTROL	0x00
+
+#define VDMAFB_HORIZONTAL_TOTAL	0x04
+#define VDMAFB_HORIZONTAL_WIDTH	0x08
+#define VDMAFB_HORIZONTAL_SYNC	0x0C
+#define VDMAFB_HORIZONTAL_FRONT_PORCH	0x10
+#define VDMAFB_HORIZONTAL_BACK_PORCH	0x14
+#define VDMAFB_HORIZONTAL_POLARITY	0x18
+
+#define VDMAFB_VERTICAL_TOTAL	0x1C
+#define VDMAFB_VERTICAL_HEIGHT	0x20
+#define VDMAFB_VERTICAL_SYNC	0x24
+#define VDMAFB_VERTICAL_FRONT_PORCH	0x28
+#define VDMAFB_VERTICAL_BACK_PORCH	0x2C
+#define VDMAFB_VERTICAL_POLARITY	0x30
+
+#define VDMAFB_BACKLIGHT_CONTROL	0x50
+#define VDMAFB_BACKLIGHT_LEVEL_1K	0x54
 
 /* Register control flags */
 #define VDMAFB_CONTROL_ENABLE 1
-
 
 struct vdmafb_dev {
 	struct fb_info info;
@@ -94,8 +115,28 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
 		dma_async_issue_pending(fbdev->dma);
 	}
 
+	/* Configure IP via registers */
+	vdmafb_writereg(fbdev, VDMAFB_HORIZONTAL_TOTAL,
+		var->hsync_len + var->left_margin + var->xres + var->right_margin);
+	vdmafb_writereg(fbdev, VDMAFB_HORIZONTAL_SYNC, var->hsync_len);
+	vdmafb_writereg(fbdev, VDMAFB_HORIZONTAL_FRONT_PORCH, var->left_margin);
+	vdmafb_writereg(fbdev, VDMAFB_HORIZONTAL_WIDTH, var->xres);
+	vdmafb_writereg(fbdev, VDMAFB_HORIZONTAL_BACK_PORCH, var->right_margin);
+	vdmafb_writereg(fbdev, VDMAFB_HORIZONTAL_POLARITY, 0); /* TODO */
+	vdmafb_writereg(fbdev, VDMAFB_VERTICAL_TOTAL,
+		var->vsync_len + var->upper_margin + var->yres + var->lower_margin);
+	vdmafb_writereg(fbdev, VDMAFB_VERTICAL_SYNC, var->vsync_len);
+	vdmafb_writereg(fbdev, VDMAFB_VERTICAL_FRONT_PORCH, var->upper_margin);
+	vdmafb_writereg(fbdev, VDMAFB_VERTICAL_HEIGHT, var->yres);
+	vdmafb_writereg(fbdev, VDMAFB_VERTICAL_BACK_PORCH, var->lower_margin);
+	vdmafb_writereg(fbdev, VDMAFB_VERTICAL_POLARITY, 0);
 	/* Enable output */
 	vdmafb_writereg(fbdev, VDMAFB_CONTROL, VDMAFB_CONTROL_ENABLE);
+
+	/* Set brightness */
+
+	vdmafb_writereg(fbdev, VDMAFB_BACKLIGHT_CONTROL, 1);
+	vdmafb_writereg(fbdev, VDMAFB_BACKLIGHT_LEVEL_1K, 800);
 
 	return 0;
 }
@@ -136,8 +177,15 @@ static void vdmafb_init_var(struct vdmafb_dev *fbdev, struct platform_device *pd
 	var->yres_virtual = var->yres;
 	var->bits_per_pixel = 32;
 	/* Clock settings */
-	var->pixclock = KHZ2PICOS(65000);
+	var->pixclock = KHZ2PICOS(51200);
 	var->vmode = FB_VMODE_NONINTERLACED;
+	of_property_read_u32(np, "horizontal-sync", &var->hsync_len);
+	of_property_read_u32(np, "horizontal-front-porch", &var->left_margin);
+	of_property_read_u32(np, "horizontal-back-porch", &var->right_margin);
+	of_property_read_u32(np, "vertical-sync", &var->vsync_len);
+	of_property_read_u32(np, "vertical-front-porch", &var->upper_margin);
+	of_property_read_u32(np, "vertical-back-porch", &var->lower_margin);
+	/* TODO: sync */
 	/* 32 BPP */
 	var->transp.offset = 24;
 	var->transp.length = 8;
@@ -271,6 +319,7 @@ static int vdmafb_remove(struct platform_device *pdev)
 
 	unregister_framebuffer(&fbdev->info);
 	/* Disable display */
+	vdmafb_writereg(fbdev, VDMAFB_BACKLIGHT_CONTROL, 0);
 	vdmafb_writereg(fbdev, VDMAFB_CONTROL, 0);
 	dma_release_channel(fbdev->dma);
 	dma_free_coherent(&pdev->dev, PAGE_ALIGN(fbdev->info.fix.smem_len),
