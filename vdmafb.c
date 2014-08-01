@@ -92,7 +92,7 @@ static int vdmafb_bl_update_status(struct backlight_device *bl)
 	int	brightness = bl->props.brightness;
 	u32 power = 1;
 
-	printk(KERN_DEBUG "%s: b=%d p=%d\n",
+	pr_debug("%s: b=%d p=%d\n",
 		__func__, brightness, bl->props.power);
 
 	if (bl->props.power != 0)
