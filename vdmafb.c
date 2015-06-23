@@ -118,6 +118,7 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
 {
 	struct fb_var_screeninfo *var = &fbdev->info.var;
 	struct dma_async_tx_descriptor *desc;
+	int ret;
 
 	/* Disable display */
 	vdmafb_writereg(fbdev, VDMAFB_CONTROL, 0);
@@ -129,8 +130,11 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
 	fbdev->dma_config.vsize = var->yres;
 	fbdev->dma_config.stride = var->xres * 4;
 
-	dmaengine_device_control(fbdev->dma, DMA_SLAVE_CONFIG,
-		(unsigned long)&fbdev->dma_config);
+	ret = dmaengine_slave_config(fbdev->dma, &fbdev->dma_config);
+	if (ret) {
+		pr_err("Failed DMA slave configuration\n");
+		return ret;
+	}
 
 	desc = dmaengine_prep_slave_single(fbdev->dma,
 				fbdev->fb_phys,
