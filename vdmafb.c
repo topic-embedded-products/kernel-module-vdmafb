@@ -37,7 +37,7 @@
 #include <linux/platform_device.h>
 #include <linux/string.h>
 #include <linux/slab.h>
-#include <linux/amba/xilinx_dma.h>
+#include <linux/dma/xilinx_dma.h>
 
 /* Register locations */
 #define VDMAFB_CONTROL	0x00
