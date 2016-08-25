@@ -317,8 +317,11 @@ static int vdmafb_probe(struct platform_device *pdev)
 
 	fbdev->dma = dma_request_slave_channel(&pdev->dev, "video");
 	if (IS_ERR_OR_NULL(fbdev->dma)) {
-		ret = PTR_ERR(fbdev->dma);
 		dev_err(&pdev->dev, "Failed to allocate DMA channel (%d).\n", ret);
+		if (fbdev->dma)
+			ret = PTR_ERR(fbdev->dma);
+		else
+			ret = -EPROBE_DEFER;
 		goto err_dma_free;
 	}
 
