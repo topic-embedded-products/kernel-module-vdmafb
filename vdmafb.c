@@ -71,7 +71,6 @@ struct vdmafb_dev {
 	void __iomem *fb_virt;
 	/* VDMA handle */
 	struct dma_chan *dma;
-	struct xilinx_dma_config dma_config;
 	/* Palette data */
 	u32 pseudo_palette[16];
 };
@@ -118,6 +117,8 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
 {
 	struct fb_var_screeninfo *var = &fbdev->info.var;
 	struct dma_async_tx_descriptor *desc;
+	struct xilinx_dma_config dma_config;
+	int hsize = var->xres * 4;
 	int ret;
 
 	/* Disable display */
@@ -126,19 +127,20 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
 	/* Setup VDMA address etc */
 	dmaengine_terminate_all(fbdev->dma);
 
-	fbdev->dma_config.hsize = var->xres * 4;
-	fbdev->dma_config.vsize = var->yres;
-	fbdev->dma_config.stride = var->xres * 4;
+	memset(&dma_config, 0, sizeof(dma_config));
+	dma_config.hsize = hsize;
+	dma_config.vsize = var->yres;
+	dma_config.stride = hsize;
 
-	ret = dmaengine_slave_config(fbdev->dma, &fbdev->dma_config);
+	ret = dmaengine_slave_config(fbdev->dma, &dma_config);
 	if (ret) {
-		pr_err("Failed DMA slave configuration\n");
+		pr_err("Failed DMA slave configuration: %d\n", ret);
 		return ret;
 	}
 
 	desc = dmaengine_prep_slave_single(fbdev->dma,
 				fbdev->fb_phys,
-				fbdev->dma_config.vsize * fbdev->dma_config.stride,
+				var->yres * hsize,
 				DMA_MEM_TO_DEV, 0);
 	if (!desc) {
 		pr_err("Failed to prepare DMA descriptor\n");
