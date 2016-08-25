@@ -71,6 +71,7 @@ struct vdmafb_dev {
 	void __iomem *fb_virt;
 	/* VDMA handle */
 	struct dma_chan *dma;
+	struct dma_interleaved_template *dma_template;
 	/* Palette data */
 	u32 pseudo_palette[16];
 };
@@ -117,31 +118,46 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
 {
 	struct fb_var_screeninfo *var = &fbdev->info.var;
 	struct dma_async_tx_descriptor *desc;
-	struct xilinx_dma_config dma_config;
+	struct dma_interleaved_template *dma_template = fbdev->dma_template;
+	struct xilinx_vdma_config vdma_config;
 	int hsize = var->xres * 4;
 	int ret;
 
 	/* Disable display */
 	vdmafb_writereg(fbdev, VDMAFB_CONTROL, 0);
 
-	/* Setup VDMA address etc */
 	dmaengine_terminate_all(fbdev->dma);
 
-	memset(&dma_config, 0, sizeof(dma_config));
-	dma_config.hsize = hsize;
-	dma_config.vsize = var->yres;
-	dma_config.stride = hsize;
+	/* Setup VDMA address etc */
+	memset(&vdma_config, 0, sizeof(vdma_config));
+	vdma_config.park = 1;
+	xilinx_vdma_channel_set_config(fbdev->dma, &vdma_config);
 
-	ret = dmaengine_slave_config(fbdev->dma, &dma_config);
-	if (ret) {
-		pr_err("Failed DMA slave configuration: %d\n", ret);
-		return ret;
-	}
+       /*
+        * Interleaved DMA:
+        * Each interleaved frame is a row (hsize) implemented in ONE
+        * chunk (sgl has len 1).
+        * The number of interleaved frames is the number of rows (vsize).
+        * The icg in used to pack data to the HW, so that the buffer len
+        * is fb->piches[0], but the actual size for the hw is somewhat less
+        */
+       dma_template->dir = DMA_MEM_TO_DEV;
+       dma_template->src_start = fbdev->fb_phys;
+       /* sgl list have just one entry (each interleaved frame have 1 chunk) */
+       dma_template->frame_size = 1;
+       /* the number of interleaved frame, each has the size specified in sgl */
+       dma_template->numf = var->yres;
+       dma_template->src_sgl = 1;
+       dma_template->src_inc = 1;
+       /* vdma IP does not provide any addr to the hdmi IP */
+       dma_template->dst_inc = 0;
+       dma_template->dst_sgl = 0;
+       /* horizontal size */
+       dma_template->sgl[0].size = hsize;
+       /* the vdma driver seems to look at icg, and not src_icg */
+       dma_template->sgl[0].icg = 0; /*  stride - hsize */
 
-	desc = dmaengine_prep_slave_single(fbdev->dma,
-				fbdev->fb_phys,
-				var->yres * hsize,
-				DMA_MEM_TO_DEV, 0);
+       desc = dmaengine_prep_interleaved_dma(fbdev->dma, dma_template, 0);
 	if (!desc) {
 		pr_err("Failed to prepare DMA descriptor\n");
 		return -ENOMEM;
@@ -283,6 +299,12 @@ static int vdmafb_probe(struct platform_device *pdev)
 	fbdev->info.fbops = &vdmafb_ops;
 	fbdev->info.device = &pdev->dev;
 	fbdev->info.par = fbdev;
+
+	fbdev->dma_template = devm_kzalloc(&pdev->dev,
+		sizeof(struct dma_interleaved_template) +
+		sizeof(struct data_chunk), GFP_KERNEL);
+	if (!fbdev->dma_template)
+		return -ENOMEM;
 
 	vdmafb_init_var(fbdev, pdev);
 	vdmafb_init_fix(fbdev);
