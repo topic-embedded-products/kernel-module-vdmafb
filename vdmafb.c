@@ -131,6 +131,7 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
 	/* Setup VDMA address etc */
 	memset(&vdma_config, 0, sizeof(vdma_config));
 	vdma_config.park = 1;
+	vdma_config.coalesc = 255; /* Reduces unused interrupts */
 	xilinx_vdma_channel_set_config(fbdev->dma, &vdma_config);
 
        /*
