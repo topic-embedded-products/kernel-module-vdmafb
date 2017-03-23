@@ -72,6 +72,7 @@ struct vdmafb_dev {
 	/* VDMA handle */
 	struct dma_chan *dma;
 	struct dma_interleaved_template *dma_template;
+	u32 frames;
 	/* Palette data */
 	u32 pseudo_palette[16];
 };
@@ -121,6 +122,7 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
 	struct dma_interleaved_template *dma_template = fbdev->dma_template;
 	struct xilinx_vdma_config vdma_config;
 	int hsize = var->xres * 4;
+	u32 frame;
 	int ret;
 
 	/* Disable display */
@@ -158,14 +160,15 @@ static int vdmafb_setupfb(struct vdmafb_dev *fbdev)
        /* the vdma driver seems to look at icg, and not src_icg */
        dma_template->sgl[0].icg = 0; /*  stride - hsize */
 
-       desc = dmaengine_prep_interleaved_dma(fbdev->dma, dma_template, 0);
-	if (!desc) {
-		pr_err("Failed to prepare DMA descriptor\n");
-		return -ENOMEM;
-	} else {
+	for (frame = 0; frame < fbdev->frames; ++frame) {
+		desc = dmaengine_prep_interleaved_dma(fbdev->dma, dma_template, 0);
+		if (!desc) {
+			pr_err("Failed to prepare DMA descriptor\n");
+			return -ENOMEM;
+		}
 		dmaengine_submit(desc);
-		dma_async_issue_pending(fbdev->dma);
 	}
+	dma_async_issue_pending(fbdev->dma);
 
 	/* Configure IP via registers */
 	vdmafb_writereg(fbdev, VDMAFB_HORIZONTAL_TOTAL,
@@ -221,6 +224,17 @@ static void vdmafb_init_var(struct vdmafb_dev *fbdev, struct platform_device *pd
 	if (ret) {
 		dev_err(&pdev->dev, "Can't parse height property, assume 768\n");
 		var->yres = 768;
+	}
+
+	/*
+	 * Xilinx VDMA requires clients to submit exactly the number of frame
+	 * stores, but doesn't supply a way to retrieve that number. Pass the
+	 * xlnx,num-fstores value of the VDMA node to num-fstores here.
+	 */
+	ret = of_property_read_u32(np, "num-fstores", &fbdev->frames);
+	if (ret) {
+		dev_err(&pdev->dev, "Can't parse num-fstores property, assume 3\n");
+		fbdev->frames = 3;
 	}
 
 	var->accel_flags = FB_ACCEL_NONE;
